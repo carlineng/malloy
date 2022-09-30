@@ -19,7 +19,8 @@ import { databasesFromEnvironmentOr } from "../../util";
 
 // No prebuilt shared model, each test is complete.  Makes debugging easier.
 
-const runtimes = new RuntimeList(databasesFromEnvironmentOr(allDatabases));
+export const justDuckDb = ["duckdb"];
+const runtimes = new RuntimeList(databasesFromEnvironmentOr(justDuckDb));
 
 const splitFunction: Record<string, string> = {
   bigquery: "split",
@@ -285,17 +286,18 @@ runtimes.runtimeMap.forEach((runtime, databaseName) => {
     // a cross join produces a Many to Many result.
     // symmetric aggregate are needed on both sides of the join
     // Check the row count and that sums on each side work properly.
-    const result = await runtime
-      .loadQuery(
-        `
-      query: table('malloytest.state_facts') -> {
+    const query = `
+    query: table('malloytest.state_facts') -> {
         group_by: state
         aggregate: c is count()
         limit: 3
       }
-      `
-      )
-      .run();
+    `;
+
+    const queryMaterializer = runtime.loadQuery(query);
+    const sqlQuery = await queryMaterializer.getSQL();
+    console.log(sqlQuery);
+    const result = await queryMaterializer.run();
     expect(result.resultExplore.limit).toBe(3);
   });
 

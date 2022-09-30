@@ -21,6 +21,7 @@ import {
 import { BigQueryConnection } from "@malloydata/db-bigquery";
 import { PooledPostgresConnection } from "@malloydata/db-postgres";
 import { DuckDBConnection } from "@malloydata/db-duckdb";
+// import { SnowflakeConnection } from "@malloydata/db-snowflake";
 
 export class BigQueryTestConnection extends BigQueryConnection {
   // we probably need a better way to do this.
@@ -84,7 +85,7 @@ export function rows(qr: Result): any[] {
   return qr.data.value;
 }
 
-export const allDatabases = ["postgres", "bigquery", "duckdb"];
+export const allDatabases = ["postgres", "bigquery", "duckdb", "snowflake"];
 type RuntimeDatabaseNames = typeof allDatabases[number];
 
 export class RuntimeList {
