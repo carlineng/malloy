@@ -1836,7 +1836,9 @@ export class Runtime {
    * or loading further related objects.
    */
   public loadQuery(query: QueryURL | QueryString): QueryMaterializer {
-    return this.loadModel(query).loadFinalQuery();
+    const modelMaterializer = this.loadModel(query);
+    const finalQuery = modelMaterializer.loadFinalQuery();
+    return finalQuery;
   }
 
   /**
@@ -2141,7 +2143,7 @@ export class ModelMaterializer extends FluentState<Model> {
               source: query,
             });
       const model = await this.getModel();
-      const queryModel = await Malloy.compile({
+      const queryModel: Model = await Malloy.compile({
         urlReader,
         connections,
         parse,

@@ -21,7 +21,7 @@ import {
 import { BigQueryConnection } from "@malloydata/db-bigquery";
 import { PooledPostgresConnection } from "@malloydata/db-postgres";
 import { DuckDBConnection } from "@malloydata/db-duckdb";
-// import { SnowflakeConnection } from "@malloydata/db-snowflake";
+import { SnowflakeConnection } from "@malloydata/db-snowflake";
 
 export class BigQueryTestConnection extends BigQueryConnection {
   // we probably need a better way to do this.
@@ -78,6 +78,26 @@ export class DuckDBTestConnection extends DuckDBConnection {
   }
 }
 
+export class SnowflakeTestConnection extends SnowflakeConnection {
+  // we probably need a better way to do this.
+
+  constructor(name: string) {
+    super(name);
+  }
+
+  public async runSQL(
+    sqlCommand: string,
+    options?: RunSQLOptions
+  ): Promise<MalloyQueryData> {
+    try {
+      return await super.runSQL(sqlCommand);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.log(`Error in SQL:\n ${sqlCommand}`);
+      throw e;
+    }
+  }
+}
 const files = new EmptyURLReader();
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -102,7 +122,11 @@ export class RuntimeList {
               new BigQueryTestConnection(
                 "bigquery",
                 {},
-                { defaultProject: "malloy-data" }
+                {
+                  defaultProject: "malloy-data",
+                  serviceAccountKeyPath:
+                    process.env.BIGQUERY_SERVICE_ACCOUNT_PATH,
+                }
               )
             )
           );
@@ -116,13 +140,36 @@ export class RuntimeList {
             );
           }
           break;
-        case "duckdb": {
-          const duckdb = new DuckDBTestConnection("duckdb");
-          this.runtimeMap.set(
-            "duckdb",
-            new SingleConnectionRuntime(files, duckdb)
-          );
-        }
+        case "duckdb":
+          {
+            const duckdb = new DuckDBTestConnection("duckdb");
+            this.runtimeMap.set(
+              "duckdb",
+              new SingleConnectionRuntime(files, duckdb)
+            );
+          }
+          break;
+        case "snowflake":
+          {
+            const snowflake = new SnowflakeConnection(
+              "snowflake",
+              {},
+              {
+                account: process.env.TEST_SNOWFLAKE_ACCOUNT,
+                username: process.env.TEST_SNOWFLAKE_USERNAME,
+                password: process.env.TEST_SNOWFLAKE_PASSWORD,
+                database: process.env.TEST_SNOWFLAKE_DATABASE,
+                schema: process.env.TEST_SNOWFLAKE_SCHEMA,
+                warehouse: process.env.TEST_SNOWFLAKE_WAREHOUSE,
+                role: process.env.TEST_SNOWFLAKE_ROLE,
+              }
+            );
+            this.runtimeMap.set(
+              "snowflake",
+              new SingleConnectionRuntime(files, snowflake)
+            );
+          }
+          break;
       }
     }
   }

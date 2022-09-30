@@ -11,6 +11,8 @@
  * GNU General Public License for more details.
  */
 
+// Copy/Pasta'd from Duckdb Dialect
+
 import {
   DateUnit,
   Expr,
@@ -114,7 +116,7 @@ WITH
 `.split(/\s/);
 
 const castMap: Record<string, string> = {
-  number: "double precision",
+  number: "float",
   string: "varchar",
 };
 
@@ -124,22 +126,21 @@ const pgExtractionMap: Record<string, string> = {
 };
 
 const inSeconds: Record<string, number> = {
-  second: 1,
   minute: 60,
   hour: 3600,
 };
 
-export class DuckDBDialect extends Dialect {
-  name = "duckdb";
-  defaultNumberType = "DOUBLE";
+export class SnowflakeDialect extends Dialect {
+  name = "snowflake";
+  defaultNumberType = "FLOAT";
   hasFinalStage = false;
-  stringTypeName = "VARCHAR";
-  divisionIsInteger = true;
-  supportsSumDistinctFunction = false;
+  stringTypeName = "TEXT";
+  divisionIsInteger = false;
+  supportsSumDistinctFunction = true;
   unnestWithNumbers = true;
   defaultSampling = { rows: 50000 };
-  supportUnnestArrayAgg = true;
-  supportsCTEinCoorelatedSubQueries = true;
+  supportUnnestArrayAgg = false;
+  supportsCTEinCoorelatedSubQueries = false;
 
   functionInfo: Record<string, FunctionInfo> = {
     concat: { returnType: "string" },
@@ -155,11 +156,15 @@ export class DuckDBDialect extends Dialect {
   }
 
   sqlGroupSetTable(groupSetCount: number): string {
-    return `CROSS JOIN (SELECT UNNEST(GENERATE_SERIES(0,${groupSetCount},1)) as group_set  ) as group_set`;
+    return `CROSS JOIN (
+      SELECT
+        ROW_NUMBER() OVER (ORDER BY SEQ4()) - 1 AS group_set
+      FROM table(generator(rowcount => ${groupSetCount}+1))
+    ) group_set`;
   }
 
   sqlAnyValue(groupSet: number, fieldName: string): string {
-    return `FIRST(${fieldName}) FILTER (WHERE ${fieldName} IS NOT NULL)`;
+    return `ANY_VALUE(${fieldName})`;
   }
 
   mapFields(fieldList: DialectFieldList): string {
@@ -172,21 +177,40 @@ export class DuckDBDialect extends Dialect {
     orderBy: string | undefined,
     limit: number | undefined
   ): string {
-    let tail = "";
-    if (limit !== undefined) {
-      tail += `[1:${limit}]`;
-    }
     const fields = fieldList
-      .map((f) => `\n  ${f.sqlOutputName}: ${f.sqlExpression}`)
+      .map((f) => {
+        const unquotedFieldName = f.sqlOutputName.replace(/"/g, "'");
+        return `
+          ${unquotedFieldName},
+          CASE WHEN group_set = ${groupSet} THEN ${f.sqlExpression} ELSE NULL END
+        `;
+      })
       .join(", ");
-    return `COALESCE(LIST({${fields}} ${orderBy}) FILTER (WHERE group_set=${groupSet})${tail},[])`;
+
+    // Need to remove the empty object {} from the resulting array
+    const objectConstruct = `CASE WHEN OBJECT_CONSTRUCT_KEEP_NULL(${fields}) = {} THEN NULL ELSE OBJECT_CONSTRUCT_KEEP_NULL(${fields}) END`;
+    let arrayAgg = `ARRAY_AGG( ${objectConstruct} ) WITHIN GROUP (${orderBy})`;
+
+    if (limit !== undefined) {
+      arrayAgg = `ARRAY_SLICE(${arrayAgg}, 0, ${limit} - 1)`;
+    }
+
+    const finalSql = `
+    COALESCE(
+      ${arrayAgg},
+      []
+    )`;
+
+    return finalSql;
   }
 
+  // TODO:
   sqlAnyValueTurtle(groupSet: number, fieldList: DialectFieldList): string {
-    const fields = fieldList
-      .map((f) => `${f.sqlExpression} as ${f.sqlOutputName}`)
-      .join(", ");
-    return `ANY_VALUE(CASE WHEN group_set=${groupSet} THEN ROW(${fields}))`;
+    throw new Error("Not yet implemented");
+    // const fields = fieldList
+    //   .map((f) => `${f.sqlExpression} as ${f.sqlOutputName}`)
+    //   .join(", ");
+    // return `ANY_VALUE(CASE WHEN group_set=${groupSet} THEN ROW(${fields}))`;
   }
 
   sqlAnyValueLastTurtle(
@@ -197,38 +221,48 @@ export class DuckDBDialect extends Dialect {
     return `MAX(CASE WHEN group_set=${groupSet} THEN ${name}__${groupSet} END) as ${sqlName}`;
   }
 
+  // I think this is equivalent?
+  // https://docs.snowflake.com/en/sql-reference/functions/object_construct.html
   sqlCoaleseMeasuresInline(
     groupSet: number,
     fieldList: DialectFieldList
   ): string {
     const fields = fieldList
-      .map((f) => `${f.sqlOutputName}: ${f.sqlExpression} `)
-      .join(", ");
+      .map((f) => `${f.sqlOutputName.replace(/"/g, "'")},${f.sqlExpression}`)
+      .join(",");
     const nullValues = fieldList
-      .map((f) => `${f.sqlOutputName}: NULL`)
-      .join(", ");
+      .map((f) => `${f.sqlOutputName.replace(/"/g, "'")},NULL`)
+      .join(",");
 
-    return `COALESCE(FIRST({${fields}}) FILTER(WHERE group_set=${groupSet}), {${nullValues}})`;
+    return `COALESCE(
+        ANY_VALUE(CASE WHEN group_set=${groupSet} THEN OBJECT_CONSTRUCT_KEEP_NULL(${fields}) END)
+        , OBJECT_CONSTRUCT_KEEP_NULL(${nullValues})
+      )`;
   }
 
+  // horrible hack to get around casing issues --
+  // add both "__row_id" and "__ROW_ID" to this table
   sqlUnnestAlias(
     source: string,
     alias: string,
     _fieldList: DialectFieldList,
     _needDistinctKey: boolean
   ): string {
-    return `LEFT JOIN (select UNNEST(generate_series(1,
-        100000, --
-        -- (SELECT genres_length FROM movies limit 1),
-        1)) as __row_id) as ${alias} ON  ${alias}.__row_id <= array_length(${source})`;
+    return `LEFT JOIN (
+      SELECT
+        ROW_NUMBER() OVER (ORDER BY SEQ4()) AS "__row_id"
+        , "__row_id" AS __ROW_ID
+      FROM table(generator(rowcount => 100000))
+      ) as ${alias} ON  ${alias}."__row_id" <= ARRAY_SIZE(${source})`;
   }
 
+  // Snowflake looks like it supports SUM(DISTINCT x)
   sqlSumDistinctHashedKey(_sqlDistinctKey: string): string {
     return "uses sumDistinctFunction, should not be called";
   }
 
   sqlGenerateUUID(): string {
-    return `GEN_RANDOM_UUID()`;
+    return `UUID_STRING()`;
   }
 
   sqlDateToString(sqlDateExp: string): string {
@@ -249,6 +283,7 @@ export class DuckDBDialect extends Dialect {
     }
   }
 
+  // TODO: this one isn't working yet
   sqlUnnestPipelineHead(
     isSingleton: boolean,
     sourceSQLExpression: string
@@ -257,27 +292,36 @@ export class DuckDBDialect extends Dialect {
     if (isSingleton) {
       p = `[${p}]`;
     }
-    return `(SELECT UNNEST(${p}) as base)`;
+    return `(
+      SELECT
+        value as base
+      FROM TABLE(FLATTEN(input => ${p}))
+    )`;
   }
 
+  // Couldn't find what this was used for... `malloy_query.addUDF` appears unused?
   sqlCreateFunction(id: string, funcText: string): string {
-    return `DROP MACRO IF EXISTS ${id}; \n${hackSplitComment}\n CREATE MACRO ${id}(_param) AS (\n${indent(
-      funcText
-    )}\n);\n${hackSplitComment}\n`;
+    throw new Error("Not implemented Yet");
   }
 
   sqlCreateFunctionCombineLastStage(
     lastStageName: string,
     structDef: StructDef
   ): string {
-    return `SELECT LIST(ROW(${structDef.fields
-      .map((fieldDef) => this.sqlMaybeQuoteIdentifier(getIdentifier(fieldDef)))
+    return `SELECT ARRAY_AGG(OBJECT_CONSTRUCT(${structDef.fields
+      .map(
+        (fieldDef) =>
+          `${getIdentifier(fieldDef).replace(
+            /"/g,
+            "'"
+          )}, ${this.sqlMaybeQuoteIdentifier(getIdentifier(fieldDef))}`
+      )
       .join(",")})) FROM ${lastStageName}\n`;
   }
 
   sqlSelectAliasAsStruct(alias: string, physicalFieldNames: string[]): string {
-    return `ROW(${physicalFieldNames
-      .map((name) => `${alias}.${name}`)
+    return `OBJECT_CONSTRUCT(${physicalFieldNames
+      .map((name) => `${name.replace(/"/g, "'")}, ${alias}.${name}`)
       .join(", ")})`;
   }
   // TODO
@@ -293,8 +337,9 @@ export class DuckDBDialect extends Dialect {
   }
 
   // The simple way to do this is to add a comment on the table
-  //  with the expiration time. https://www.postgresql.org/docs/current/sql-comment.html
+  //  with the expiration time. https://docs.snowflake.com/en/sql-reference/sql/create-table.html
   //  and have a reaper that read comments.
+  // Looks like this is used for PDTs/in-warehouse caching
   sqlCreateTableAsSelect(_tableName: string, _sql: string): string {
     throw new Error("Not implemented Yet");
   }
@@ -306,26 +351,25 @@ export class DuckDBDialect extends Dialect {
   sqlMeasureTime(from: TimeValue, to: TimeValue, units: string): Expr {
     let lVal = from.value;
     let rVal = to.value;
-    if (inSeconds[units]) {
-      lVal = mkExpr`EXTRACT(EPOCH FROM ${lVal})`;
-      rVal = mkExpr`EXTRACT(EPOCH FROM ${rVal})`;
-      const duration = mkExpr`(${rVal} - ${lVal})`;
-      return units == "second"
-        ? duration
-        : mkExpr`FLOOR(${duration}/${inSeconds[units].toString()})`;
+    let diffUsing = "TIMESTAMPDIFF";
+
+    if (units == "second" || units == "minute" || units == "hour") {
+      if (from.valueType != "timestamp") {
+        lVal = mkExpr`TIMESTAMP(${lVal})`;
+      }
+      if (to.valueType != "timestamp") {
+        rVal = mkExpr`TIMESTAMP(${rVal})`;
+      }
+    } else {
+      diffUsing = "DATEDIFF";
+      if (from.valueType != "date") {
+        lVal = mkExpr`DATE(${lVal})`;
+      }
+      if (to.valueType != "date") {
+        rVal = mkExpr`DATE(${rVal})`;
+      }
     }
-    if (from.valueType != "date") {
-      lVal = mkExpr`CAST((${lVal}) AS DATE)`;
-    }
-    if (to.valueType != "date") {
-      rVal = mkExpr`CAST((${rVal}) AS DATE)`;
-    }
-    if (units == "week") {
-      // DuckDB's weeks start on Monday, but Malloy's weeks start on Sunday
-      lVal = mkExpr`(${lVal} + INTERVAL 1 DAY)`;
-      rVal = mkExpr`(${rVal} + INTERVAL 1 DAY)`;
-    }
-    return mkExpr`DATE_DIFF('${units}', ${lVal}, ${rVal})`;
+    return mkExpr`${diffUsing}(${units}, ${lVal}, ${rVal})`;
   }
 
   sqlNow(): Expr {
@@ -336,10 +380,10 @@ export class DuckDBDialect extends Dialect {
     // adjusting for monday/sunday weeks
     const week = units == "week";
     const truncThis = week
-      ? mkExpr`${sqlTime.value} + INTERVAL 1 DAY`
+      ? mkExpr`${sqlTime.value}+interval '1 day'`
       : sqlTime.value;
     const trunced = mkExpr`DATE_TRUNC('${units}', ${truncThis})`;
-    return week ? mkExpr`(${trunced} - INTERVAL 1 DAY)` : trunced;
+    return week ? mkExpr`(${trunced}-interval '1 day')` : trunced;
   }
 
   sqlExtract(from: TimeValue, units: ExtractUnit): Expr {
@@ -354,16 +398,8 @@ export class DuckDBDialect extends Dialect {
     n: Expr,
     timeframe: DateUnit
   ): Expr {
-    if (timeframe == "quarter") {
-      timeframe = "month";
-      n = mkExpr`${n}*3`;
-    }
-    if (timeframe == "week") {
-      timeframe = "day";
-      n = mkExpr`${n}*7`;
-    }
-    const interval = mkExpr`INTERVAL (${n}) ${timeframe}`;
-    return mkExpr`((${expr.value})) ${op} ${interval}`;
+    const interval = mkExpr`INTERVAL '${n} ${timeframe}'`;
+    return mkExpr`((${expr.value})${op}${interval})`;
   }
 
   sqlCast(cast: TypecastFragment): Expr {
@@ -375,7 +411,7 @@ export class DuckDBDialect extends Dialect {
   }
 
   sqlRegexpMatch(expr: Expr, regexp: string): Expr {
-    return mkExpr`REGEXP_MATCHES(${expr}, ${regexp})`;
+    return mkExpr`IFF(REGEXP_INSTR(${expr}, ${regexp}) > 0, true, false)`;
   }
 
   sqlLiteralTime(
@@ -384,7 +420,7 @@ export class DuckDBDialect extends Dialect {
     _timezone: string
   ): string {
     if (type == "date") {
-      return `DATE '${timeString}'`;
+      return `DATE('${timeString}')`;
     } else if (type == "timestamp") {
       return `TIMESTAMP '${timeString}'`;
     } else {
@@ -393,22 +429,14 @@ export class DuckDBDialect extends Dialect {
   }
 
   sqlSumDistinct(key: string, value: string): string {
-    // return `sum_distinct(list({key:${key}, val: ${value}}))`;
-    return `(
-      SELECT sum(a.val) as value
-      FROM (
-        SELECT UNNEST(list(distinct {key:${key}, val: ${value}})) a
-      )
-    )`;
+    const _factor = 32;
+    const precision = 0.000001;
+    // This might not be sufficient? lower64 of md5 could still have collisions
+    const keySQL = `MD5_NUMBER_LOWER64(${key}::varchar)`;
+    return `
+    (SUM(DISTINCT ${keySQL} + FLOOR(IFNULL(${value},0)/${precision})) -  SUM(DISTINCT ${keySQL}))*${precision}
+    `;
   }
-  // sqlSumDistinct(key: string, value: string): string {
-  //   const _factor = 32;
-  //   const precision = 0.000001;
-  //   const keySQL = `md5_number_lower(${key}::varchar)::int128`;
-  //   return `
-  //   (SUM(DISTINCT ${keySQL} + FLOOR(IFNULL(${value},0)/${precision})::int128) -  SUM(DISTINCT ${keySQL}))*${precision}
-  //   `;
-  // }
 
   // default duckdb to sampling 50K rows.
   sqlSampleTable(tableSQL: string, sample: Sampling | undefined): string {
@@ -417,9 +445,9 @@ export class DuckDBDialect extends Dialect {
         sample = this.defaultSampling;
       }
       if (isSamplingRows(sample)) {
-        return `(SELECT * FROM ${tableSQL} USING SAMPLE ${sample.rows})`;
+        return `(SELECT * FROM ${tableSQL} SAMPLE (${sample.rows} ROWS))`;
       } else if (isSamplingPercent(sample)) {
-        return `(SELECT * FROM ${tableSQL} USING SAMPLE ${sample.percent} PERCENT (bernoulli))`;
+        return `(SELECT * FROM ${tableSQL} SAMPLE (${sample.percent}))`;
       }
     }
     return tableSQL;

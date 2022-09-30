@@ -2145,7 +2145,7 @@ class QueryQuery extends QueryField {
     let structSQL = qs.structSourceSQL(stageWriter);
     if (isJoinOn(structRelationship)) {
       if (ji.makeUniqueKey) {
-        structSQL = `(SELECT ${qs.dialect.sqlGenerateUUID()} as __distinct_key, * FROM ${structSQL})`;
+        structSQL = `(SELECT ${qs.dialect.sqlGenerateUUID()} as "__distinct_key", * FROM ${structSQL})`;
       }
       let onCondition = "";
       if (qs.parent === undefined) {
@@ -2251,7 +2251,7 @@ class QueryQuery extends QueryField {
     const structRelationship = qs.fieldDef.structRelationship;
     if (structRelationship.type === "basetable") {
       if (ji.makeUniqueKey) {
-        structSQL = `(SELECT ${qs.dialect.sqlGenerateUUID()} as __distinct_key, * FROM ${structSQL} as x)`;
+        structSQL = `(SELECT ${qs.dialect.sqlGenerateUUID()} as "__distinct_key", * FROM ${structSQL} as x)`;
       }
       s += `FROM ${structSQL} as ${this.parent.getIdentifier()}\n`;
     } else {
@@ -3136,7 +3136,7 @@ class QueryQueryIndex extends QueryQuery {
       }
     }
     s += `  END as ${fieldValueColumn},\n`;
-    s += ` ${measureSQL} as weight,\n`;
+    s += ` ${measureSQL} as "weight",\n`;
 
     // just in case we don't have any field types, force the case statement to have at least one value.
     s += `  CASE group_set\n    WHEN 99999 THEN ''`;
@@ -3181,7 +3181,7 @@ class QueryQueryIndex extends QueryQuery {
   ${fieldNameColumn},
   ${fieldTypeColumn},
   COALESCE(${fieldValueColumn}, ${fieldRangeColumn}) as ${fieldValueColumn},
-  weight
+  "weight"
 FROM ${resultStage}\n`
     );
     return this.resultStage;
@@ -3620,6 +3620,7 @@ class QueryStruct extends QueryNode {
   getFieldByName(name: string): QuerySomething {
     const path = QueryStruct.resolvePath(name);
     let ret = this as QuerySomething;
+    // console.log(`Logging fieldDef: ${JSON.stringify(this.fieldDef)}`);
     for (const n of path) {
       const r = ret.getChildByName(n);
       if (r === undefined) {
@@ -3958,7 +3959,7 @@ export class QueryModel {
               ${fieldNameColumn},
               ${fieldValueColumn},
               ${fieldTypeColumn},
-              weight,
+              "weight",
               CASE WHEN lower(${fieldValueColumn}) LIKE  lower(${generateSQLStringLiteral(
       searchValue + "%"
     )}) THEN 1 ELSE 0 END as match_first
@@ -3972,7 +3973,7 @@ export class QueryModel {
     }
             ORDER BY CASE WHEN lower(${fieldValueColumn}) LIKE  lower(${generateSQLStringLiteral(
       searchValue + "%"
-    )}) THEN 1 ELSE 0 END DESC, weight DESC
+    )}) THEN 1 ELSE 0 END DESC, "weight" DESC
             LIMIT ${limit}
           `;
     if (struct.dialect.hasFinalStage) {

@@ -15,6 +15,7 @@ import { DuckDBDialect } from ".";
 import { Dialect } from "./dialect";
 import { PostgresDialect } from "./postgres";
 import { StandardSQLDialect } from "./standardsql";
+import { SnowflakeDialect } from "./snowflake";
 
 const dialectMap = new Map<string, Dialect>();
 
@@ -33,3 +34,4 @@ export function registerDialect(d: Dialect): void {
 registerDialect(new PostgresDialect());
 registerDialect(new StandardSQLDialect());
 registerDialect(new DuckDBDialect());
+registerDialect(new SnowflakeDialect());

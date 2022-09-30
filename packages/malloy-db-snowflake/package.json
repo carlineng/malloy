@@ -1,0 +1,22 @@
+{
+  "name": "@malloydata/db-snowflake",
+  "version": "0.0.1",
+  "license": "GPL-2.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "lint": "eslint '**/*.ts{,x}'",
+    "lint-fix": "eslint '**/*.ts{,x}' --fix",
+    "test": "jest --config=../../jest.config.js",
+    "build": "tsc --build",
+    "malloyc": "ts-node ../../scripts/malloy-to-json"
+  },
+  "dependencies": {
+    "@malloydata/malloy": "*",
+    "@types/pg": "^8.6.1",
+    "@types/snowflake-sdk": "^1.6.8",
+    "pg": "^8.7.1",
+    "pg-query-stream": "4.2.3",
+    "snowflake-sdk": "^1.6.13"
+  }
+}
