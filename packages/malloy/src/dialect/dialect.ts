@@ -120,6 +120,11 @@ export abstract class Dialect {
     sourceSQLExpression: string
   ): string;
 
+  abstract sqlPipelinedStage(
+    pipelinesSQL: string,
+    lastStageName: string
+  ): string;
+
   abstract sqlCreateFunction(id: string, funcText: string): string;
 
   abstract sqlCreateFunctionCombineLastStage(

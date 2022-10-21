@@ -1,4 +1,12 @@
 ## Development notes:
+
+### 2022-11-02
+- Can overcome the casing issues described below using `as` to alias the fields whenc reating StructDefs
+- Got the `UDF` tests working by re-writing the `sqlUnnestPipelineHead` function to use Snowflake's `FLATTEN` table function. I do a bit of search/replace hackery to query from last pipeline stage, so I'm not 100% sure if this works in all cases.
+- Casing issues continue to cause some problems, specifically for inlined-SQL. As of now, users are required to double-quote all identifiers in inline SQL.
+- The Array Unnest x2 test is broken due to the Snowflake dialect's `sqlFieldReference`. Semi-structured object paths must be accessed via `:`; whereas joined-in tables have their columns accessed via `.`. The `QueryFieldDistinctKey.generateExpression` method sees these situations as identical: both have `this.parent.fieldDef.structSource.type === "nested"`; but we need some way to distinguish if the nesting is via a join or via a struct, so we can tell whether to use `:` or `.`
+
+### 2022-09-30
 - The way Snowflake handles casing is problematic. Snowflake is case-insensitive by default, with all identifiers stored internally in UPPERCASE. Double-quoting identifiers signifiies case-sensitivity. Malloy, and all databases currently supported, are case-sensitive. Malloy assumes case-sensitivity, and uses quoted identifiers in some places but not others, which leads to errors where Snowflake can't find columns. See example in `test/src/databases/snowflake/snowflake.spec.ts`
 - The `index.spec.ts` tests don't work. It looks like they use a pre-built model on the query results, which don't play well with the casing issues described above (`searchValueMap` in `malloy.ts`).
 - Snowflake doesn't store the schema of ARRAY or OBJECT columns anywhere in the catalog. The only way to get schema information is to inspect the data itself. To get around this, instead of querying `information_schema`, I do a `SELECT ... LIMIT 1` on the ARRAY column, and inspect data types using the `TYPEOF` function

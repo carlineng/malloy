@@ -45,8 +45,8 @@ runtimes.runtimeMap.forEach((runtime, databaseName) =>
   expressionModels.set(
     databaseName,
     runtime.loadModel(`
-    explore: MODELS is table('TEST.AIRCRAFT_MODELS'){
-      measure: MODEL_COUNT is count()
+    explore: models is table('malloytest.aircraft_models'){
+      measure: model_count is count()
     }
   `)
   )
@@ -57,61 +57,61 @@ expressionModels.forEach((orderByModel, databaseName) => {
     const result = await orderByModel
       .loadQuery(
         `
-        query: MODELS-> {
-          group_by: BIG is SEATS >=20
-          aggregate: MODEL_COUNT is count()
+        query: models-> {
+          group_by: big is seats >=20
+          aggregate: model_count is count()
         }
         `
       )
       .run();
-    expect(result.data.row(0).cell("BIG").value).toBe(false);
-    expect(result.data.row(0).cell("MODEL_COUNT").value).toBe(58451);
+    expect(result.data.row(0).cell("big").value).toBe(false);
+    expect(result.data.row(0).cell("model_count").value).toBe(58451);
   });
 
   it(`✅ boolean in pipeline - ${databaseName}`, async () => {
     const result = await orderByModel
       .loadQuery(
         `
-        query: MODELS->{
+        query: models->{
           group_by:
-            MANUFACTURER,
-            BIG is SEATS >=21
-          aggregate: MODEL_COUNT is count()
+            manufacturer,
+            big is seats >=21
+          aggregate: model_count is count()
         }->{
-          group_by: BIG
-          aggregate: MODEL_COUNT is MODEL_COUNT.sum()
+          group_by: big
+          aggregate: model_count is model_count.sum()
         }
         `
       )
       .run();
-    expect(result.data.row(0).cell("BIG").value).toBe(false);
-    expect(result.data.row(0).cell("MODEL_COUNT").value).toBe(58500);
+    expect(result.data.row(0).cell("big").value).toBe(false);
+    expect(result.data.row(0).cell("model_count").value).toBe(58500);
   });
 
   it(`✅ filtered measures in model are aggregates #352 - ${databaseName}`, async () => {
     const result = await orderByModel
       .loadQuery(
         `
-        query: MODELS->{
-          aggregate: J_NAMES is MODEL_COUNT {where: MANUFACTURER ~ 'J%'}
+        query: models->{
+          aggregate: j_names is model_count {where: manufacturer ~ 'J%'}
         }
         -> {
-          group_by: J_NAMES
+          group_by: j_names
         }
         `
       )
       .run();
-    expect(result.data.row(0).cell("J_NAMES").value).toBe(1358);
+    expect(result.data.row(0).cell("j_names").value).toBe(1358);
   });
 
   it(`✅ reserved words are quoted - ${databaseName}`, async () => {
     const sql = await orderByModel
       .loadQuery(
         `
-      query: MODELS->{
-        aggregate: FETCH is count()
+      query: models->{
+        aggregate: fetch is count()
       }->{
-        group_by: FETCH
+        group_by: fetch
       }
       `
       )
@@ -123,15 +123,15 @@ expressionModels.forEach((orderByModel, databaseName) => {
     const sql = await orderByModel
       .loadQuery(
         `
-      query: MODELS->{
-        nest: WITHX is {
-          group_by: SELECT is UPPER(MANUFACTURER)
-          aggregate: FETCH is count()
+      query: models->{
+        nest: withx is {
+          group_by: select is UPPER(manufacturer)
+          aggregate: fetch is count()
         }
       } -> {
         project:
-          WITHXZ is lower(WITHX.SELECT)
-          FETCH is WITHX.FETCH
+          withxz is lower(withx.select)
+          fetch is withx.fetch
       }
       `
       )
@@ -143,14 +143,14 @@ expressionModels.forEach((orderByModel, databaseName) => {
     const sql = await orderByModel
       .loadQuery(
         `
-      query: MODELS->{
-        nest: WITHX is {
-          group_by: is SELECT is UPPER(MANUFACTURER)
-          aggregate: FETCH is count()
+      query: models->{
+        nest: withx is {
+          group_by: is select is UPPER(manufacturer)
+          aggregate: fetch is count()
         }
       } -> {
-        project: WITHXIS lower(WITHX.SELECT)
-        project: FETCH is WITH.FETCH
+        project: withxis lower(withx.select)
+        project: fetch is with.fetch
       }
       `
       )
@@ -162,8 +162,8 @@ expressionModels.forEach((orderByModel, databaseName) => {
     const sql = await orderByModel
       .loadQuery(
         `
-      query: MODELS->{
-        aggregate: MODEL_COUNT is count(){? MANUFACTURER ? ~'A%' }
+      query: models->{
+        aggregate: model_count is count(){? manufacturer ? ~'A%' }
       }
       `
       )
@@ -176,68 +176,68 @@ expressionModels.forEach((orderByModel, databaseName) => {
     const result = await orderByModel
       .loadQuery(
         `
-        explore: POPULAR_NAMES is from(MODELS->{
-          where: MODEL_COUNT > 100
-          group_by: MANUFACTURER
-          aggregate: MODEL_COUNT
+        explore: popular_names is from(models->{
+          where: model_count > 100
+          group_by: manufacturer
+          aggregate: model_count
         })
 
-        query: POPULAR_NAMES->{
+        query: popular_names->{
           order_by: 2
-          project: MANUFACTURER, MODEL_COUNT
+          project: manufacturer, model_count
         }
         `
       )
       .run();
-    expect(result.data.row(0).cell("MODEL_COUNT").value).toBe(102);
+    expect(result.data.row(0).cell("model_count").value).toBe(102);
   });
 
   it(`✅ modeled having complex - ${databaseName}`, async () => {
     const result = await orderByModel
       .loadQuery(
         `
-        explore: POPULAR_NAMES is from(MODELS->{
-          where: MODEL_COUNT > 100
-          group_by: MANUFACTURER
-          aggregate: MODEL_COUNT
-          nest: L is {
+        explore: popular_names is from(models->{
+          where: model_count > 100
+          group_by: manufacturer
+          aggregate: model_count
+          nest: l is {
             top: 5
-            group_by: MANUFACTURER
-            aggregate: MODEL_COUNT
+            group_by: manufacturer
+            aggregate: model_count
           }
         })
 
-        query: POPULAR_NAMES->{
+        query: popular_names->{
          order_by: 2
-         project: MANUFACTURER, MODEL_COUNT
+         project: manufacturer, model_count
         }
         `
       )
       .run();
-    expect(result.data.row(0).cell("MODEL_COUNT").value).toBe(102);
+    expect(result.data.row(0).cell("model_count").value).toBe(102);
   });
 
   it(`✅ turtle references joined element - ${databaseName}`, async () => {
     const sql = await orderByModel
       .loadQuery(
         `
-    explore: A is table('TEST.AIRCRAFT'){
-      primary_key: TAIL_NUM
-      measure: AIRCRAFT_COUNT is count(*)
+    explore: a is table('malloytest.aircraft'){
+      primary_key: tail_num
+      measure: aircraft_count is count(*)
     }
 
-    explore: F is table('TEST.FLIGHTS'){
-      primary_key: ID2
-      join_one: A with TAIL_NUM
+    explore: f is table('malloytest.flights'){
+      primary_key: id2
+      join_one: a with tail_num
 
-      measure: FLIGHT_COUNT is count()
-      query: FOO is {
-        group_by: CARRIER
-        aggregate: FLIGHT_COUNT
-        aggregate: A.AIRCRAFT_COUNT
+      measure: flight_count is count()
+      query: foo is {
+        group_by: carrier
+        aggregate: flight_count
+        aggregate: a.aircraft_count
       }
     }
-    query: F->FOO
+    query: f->foo
   `
       )
       .getSQL();

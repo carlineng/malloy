@@ -237,6 +237,10 @@ export class PostgresDialect extends Dialect {
     }
   }
 
+  sqlPipelinedStage(pipelinesSQL: string, lastStageName: string): string {
+    throw new Error("sqlPipelinedStage should not be called from postgres");
+  }
+
   sqlCreateFunction(id: string, funcText: string): string {
     return `CREATE FUNCTION ${id}(JSONB) RETURNS JSONB AS $$\n${indent(
       funcText

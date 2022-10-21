@@ -44,8 +44,8 @@ describe("Snowflake tests", () => {
     await runtimeList.closeAll();
   });
 
-  // How to handle casing? Snowflake is case-insensitive and re-maps lowercase to uppercase by default...
-  it(`❌ lowercase column aliases`, async () => {
+  // Snowflake's casing is weird. Need to specify an `as` alias in the StructDef in schemaFromQuery
+  it(`✅ lowercase column aliases`, async () => {
     const result: Result = await runtime
       .loadQuery(
         `
@@ -57,21 +57,6 @@ describe("Snowflake tests", () => {
       `
       )
       .run();
-    expect(result.data.value[0].N).toBe(1);
-  });
-
-  it(`✅ uppercase column aliases`, async () => {
-    const result: Result = await runtime
-      .loadQuery(
-        `
-      sql: one is ||
-        SELECT 1 as N
-       ;;
-
-      query: from_sql(one) -> { project: N }
-      `
-      )
-      .run();
-    expect(result.data.value[0].N).toBe(1);
+    expect(result.data.value[0].n).toBe(1);
   });
 });

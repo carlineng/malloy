@@ -32,6 +32,8 @@ import {
 import { indent } from "../model/utils";
 import { Dialect, DialectFieldList, FunctionInfo } from "./dialect";
 
+const sourceStageName = "<SOURCE_STAGE_NAME>";
+
 // need to refactor runSQL to take a SQLBlock instead of just a sql string.
 const hackSplitComment = "-- hack: split on this";
 
@@ -126,6 +128,7 @@ const pgExtractionMap: Record<string, string> = {
 };
 
 const inSeconds: Record<string, number> = {
+  second: 1,
   minute: 60,
   hour: 3600,
 };
@@ -180,16 +183,19 @@ export class SnowflakeDialect extends Dialect {
     const fields = fieldList
       .map((f) => {
         const unquotedFieldName = f.sqlOutputName.replace(/"/g, "'");
-        return `
-          ${unquotedFieldName},
-          CASE WHEN group_set = ${groupSet} THEN ${f.sqlExpression} ELSE NULL END
-        `;
+        return `${unquotedFieldName}, ${f.sqlExpression}`;
       })
       .join(", ");
 
-    // Need to remove the empty object {} from the resulting array
-    const objectConstruct = `CASE WHEN OBJECT_CONSTRUCT_KEEP_NULL(${fields}) = {} THEN NULL ELSE OBJECT_CONSTRUCT_KEEP_NULL(${fields}) END`;
-    let arrayAgg = `ARRAY_AGG( ${objectConstruct} ) WITHIN GROUP (${orderBy})`;
+    const objectConstruct = `
+    CASE
+      WHEN group_set = ${groupSet} THEN OBJECT_CONSTRUCT_KEEP_NULL(${fields})
+      ELSE NULL
+    END`;
+
+    let arrayAgg = `
+    ARRAY_AGG( ${objectConstruct} ) WITHIN GROUP (${orderBy})
+    `;
 
     if (limit !== undefined) {
       arrayAgg = `ARRAY_SLICE(${arrayAgg}, 0, ${limit} - 1)`;
@@ -204,13 +210,11 @@ export class SnowflakeDialect extends Dialect {
     return finalSql;
   }
 
-  // TODO:
   sqlAnyValueTurtle(groupSet: number, fieldList: DialectFieldList): string {
-    throw new Error("Not yet implemented");
-    // const fields = fieldList
-    //   .map((f) => `${f.sqlExpression} as ${f.sqlOutputName}`)
-    //   .join(", ");
-    // return `ANY_VALUE(CASE WHEN group_set=${groupSet} THEN ROW(${fields}))`;
+    const fields = fieldList
+      .map((f) => `${f.sqlExpression}, ${f.sqlOutputName}`)
+      .join(", ");
+    return `ANY_VALUE(CASE WHEN group_set=${groupSet} THEN OBJECT_AGG(${fields}))`;
   }
 
   sqlAnyValueLastTurtle(
@@ -218,7 +222,7 @@ export class SnowflakeDialect extends Dialect {
     groupSet: number,
     sqlName: string
   ): string {
-    return `MAX(CASE WHEN group_set=${groupSet} THEN ${name}__${groupSet} END) as ${sqlName}`;
+    return `MAX(CASE WHEN group_set=${groupSet} THEN "${name}__${groupSet}" END) as ${sqlName}`;
   }
 
   // I think this is equivalent?
@@ -228,14 +232,22 @@ export class SnowflakeDialect extends Dialect {
     fieldList: DialectFieldList
   ): string {
     const fields = fieldList
-      .map((f) => `${f.sqlOutputName.replace(/"/g, "'")},${f.sqlExpression}`)
+      .map(
+        (f) => `
+      CASE WHEN group_set=${groupSet} THEN ${f.sqlOutputName.replace(
+          /"/g,
+          "'"
+        )} ELSE NULL END,
+      CASE WHEN group_set=${groupSet} THEN ${f.sqlExpression} ELSE NULL END`
+      )
       .join(",");
+
     const nullValues = fieldList
       .map((f) => `${f.sqlOutputName.replace(/"/g, "'")},NULL`)
       .join(",");
 
     return `COALESCE(
-        ANY_VALUE(CASE WHEN group_set=${groupSet} THEN OBJECT_CONSTRUCT_KEEP_NULL(${fields}) END)
+        OBJECT_AGG(${fields})
         , OBJECT_CONSTRUCT_KEEP_NULL(${nullValues})
       )`;
   }
@@ -278,28 +290,43 @@ export class SnowflakeDialect extends Dialect {
   ): string {
     if (isArray) {
       return alias;
+    } else if (_isNested) {
+      // TODO: this doesn't work properly.
+      // In Snowflake, a nested semi-structured object must be accessed via `:`
+      // However, it looks like `_isNested` is also true when a table is nested via a JOIN.
+      // In the JOIN case, we need to use `.`
+      return `${alias}:${this.sqlMaybeQuoteIdentifier(fieldName)}`;
     } else {
       return `${alias}.${this.sqlMaybeQuoteIdentifier(fieldName)}`;
     }
   }
 
-  // TODO: this one isn't working yet
   sqlUnnestPipelineHead(
     isSingleton: boolean,
     sourceSQLExpression: string
   ): string {
     let p = sourceSQLExpression;
     if (isSingleton) {
-      p = `[${p}]`;
+      p = `ARRAY_AGG(${p})`;
     }
+
     return `(
       SELECT
         value as base
-      FROM TABLE(FLATTEN(input => ${p}))
+      FROM TABLE(FLATTEN(input => SELECT ${p} FROM ${sourceStageName} ))
     )`;
   }
 
-  // Couldn't find what this was used for... `malloy_query.addUDF` appears unused?
+  sqlPipelinedStage(pipelinesSQL: string, lastStageName: string): string {
+    // TODO: CE: not sure if this actually is the right thing to do.
+    // When `sqlUnnestPipelineHead` is called, we don't yet have access to `lastStageName`,
+    // so I'm just doing a string replacement here to fill in CTE name.
+    return `
+    SELECT
+    ${pipelinesSQL.replace(sourceStageName, lastStageName)}
+    `;
+  }
+
   sqlCreateFunction(id: string, funcText: string): string {
     throw new Error("Not implemented Yet");
   }
@@ -311,7 +338,7 @@ export class SnowflakeDialect extends Dialect {
     return `SELECT ARRAY_AGG(OBJECT_CONSTRUCT(${structDef.fields
       .map(
         (fieldDef) =>
-          `${getIdentifier(fieldDef).replace(
+          `${this.sqlMaybeQuoteIdentifier(getIdentifier(fieldDef)).replace(
             /"/g,
             "'"
           )}, ${this.sqlMaybeQuoteIdentifier(getIdentifier(fieldDef))}`
@@ -324,13 +351,6 @@ export class SnowflakeDialect extends Dialect {
       .map((name) => `${name.replace(/"/g, "'")}, ${alias}.${name}`)
       .join(", ")})`;
   }
-  // TODO
-  // sqlMaybeQuoteIdentifier(identifier: string): string {
-  //   return keywords.indexOf(identifier.toUpperCase()) > 0 ||
-  //     identifier.match(/[a-zA-Z][a-zA-Z0-9]*/) === null || true
-  //     ? '"' + identifier + '"'
-  //     : identifier;
-  // }
 
   sqlMaybeQuoteIdentifier(identifier: string): string {
     return '"' + identifier + '"';
@@ -360,6 +380,14 @@ export class SnowflakeDialect extends Dialect {
       if (to.valueType != "timestamp") {
         rVal = mkExpr`TIMESTAMP(${rVal})`;
       }
+      const durationInSeconds = mkExpr`TIMESTAMPDIFF('seconds', ${lVal}, ${rVal})`;
+      return mkExpr`FLOOR(${durationInSeconds} / ${inSeconds[
+        units
+      ].toString()})`;
+    } else if (units == "week") {
+      diffUsing = "DATEDIFF";
+      lVal = mkExpr`DATE(${lVal}) + INTERVAL '1 DAY'`;
+      rVal = mkExpr`DATE(${rVal}) + INTERVAL '1 DAY'`;
     } else {
       diffUsing = "DATEDIFF";
       if (from.valueType != "date") {
@@ -438,7 +466,7 @@ export class SnowflakeDialect extends Dialect {
     `;
   }
 
-  // default duckdb to sampling 50K rows.
+  // default to sampling 50K rows.
   sqlSampleTable(tableSQL: string, sample: Sampling | undefined): string {
     if (sample !== undefined) {
       if (isSamplingEnable(sample) && sample.enable) {

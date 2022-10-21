@@ -31,6 +31,10 @@ const splitFunction: Record<string, string> = {
   snowflake: "split",
 };
 
+const rootDbPath: Record<string, string> = {
+  snowflake: "",
+};
+
 afterAll(async () => {
   await runtimes.closeAll();
 });
@@ -39,55 +43,50 @@ afterAll(async () => {
 const databaseName = "snowflake";
 const runtime = runtimes.runtimeMap.get(databaseName);
 
-// Issue: #151
-// it(`unknown dialect  - ${databaseName}`, async () => {
-//   const result = await runtime
-//     .loadQuery(
-//       `
-//       query: q is table('${schema}.aircraft')->{
-//         where: state != null
-//         group_by: state
-//       }
-
-//       explore: r is from(->q){
-//         query: foo is {
-//           order_by: 1 desc
-//           group_by: state
-//         }
-//       }
-
-//       query: r->foo
-//   `
-//     )
-//     .run();
-//   // console.log(result.data.toObject());
-//   expect(result.data.path(0, "state").value).toBe("WY");
-// });
-let schema = "${schema}";
-if (databaseName === "snowflake") {
-  schema = "TEST";
-}
 if (!runtime) {
   throw new Error("Undefined runtime");
 }
+it(`✅ unknown dialect  - ${databaseName}`, async () => {
+  const result = await runtime
+    .loadQuery(
+      `
+      query: q is table('malloytest.aircraft')->{
+        where: state != null
+        group_by: state
+      }
+
+      explore: r is from(->q){
+        query: foo is {
+          order_by: 1 desc
+          group_by: state
+        }
+      }
+
+      query: r->foo
+  `
+    )
+    .run();
+  // console.log(result.data.toObject());
+  expect(result.data.path(0, "state").value).toBe("WY");
+});
 
 // Issue #149
 it(`✅ refine query from query  - ${databaseName}`, async () => {
-  const query = runtime.loadQuery(
-    `
-        query: from(
-          table('${schema}.STATE_FACTS')->{group_by: STATE; order_by: 1 desc; limit: 1}
-          )
-          {
-            dimension: LOWER_STATE is lower(STATE)
-          }
-          -> {project: LOWER_STATE}
-        `
-  );
-
-  const result = await query.run();
+  const result = await runtime
+    .loadQuery(
+      `
+      query: from(
+        table('malloytest.state_facts')->{group_by: state; order_by: 1 desc; limit: 1}
+        )
+        {
+          dimension: lower_state is lower(state)
+        }
+        -> {project: lower_state}
+      `
+    )
+    .run();
   // console.log(result.data.toObject());
-  expect(result.data.path(0, "LOWER_STATE").value).toBe("wy");
+  expect(result.data.path(0, "lower_state").value).toBe("wy");
 });
 
 // issue #157
@@ -98,9 +97,9 @@ it(`✅ explore - not -found  - ${databaseName}`, async () => {
     await runtime
       .loadQuery(
         `
-        explore: foo is table('.STATE_FACTS'){primary_key: state}
-        query: foox->{aggregate: c is count()}
-       `
+      explore: foo is table('malloytest.state_facts'){primary_key: state}
+      query: foox->{aggregate: c is count()}
+     `
       )
       .run();
   } catch (e) {
@@ -113,15 +112,15 @@ it(`✅ join_many - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-      explore: a is table('${schema}.AIRCRAFT'){
-        measure: avg_year is floor(avg(YEAR_BUILT))
-      }
-      explore: m is table('${schema}.AIRCRAFT_MODELS'){
-        join_many: a on a.AIRCRAFT_MODEL_CODE=AIRCRAFT_MODEL_CODE
-        measure: avg_seats is floor(avg(SEATS))
-      }
-      query: m->{aggregate: avg_seats, a.avg_year}
-      `
+    explore: a is table('malloytest.aircraft'){
+      measure: avg_year is floor(avg(year_built))
+    }
+    explore: m is table('malloytest.aircraft_models'){
+      join_many: a on a.aircraft_model_code=aircraft_model_code
+      measure: avg_seats is floor(avg(seats))
+    }
+    query: m->{aggregate: avg_seats, a.avg_year}
+    `
     )
     .run();
   expect(result.data.value[0].avg_year).toBe(1969);
@@ -132,12 +131,12 @@ it(`✅ join_many condition no primary key - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-      explore: a is table('${schema}.AIRPORTS'){}
-      explore: b is table('${schema}.STATE_FACTS') {
-        join_many: a on STATE=a.STATE
-      }
-      query: b->{aggregate: c is AIRPORT_COUNT.sum()}
-      `
+    explore: a is table('malloytest.airports'){}
+    explore: b is table('malloytest.state_facts') {
+      join_many: a on state=a.state
+    }
+    query: b->{aggregate: c is airport_count.sum()}
+    `
     )
     .run();
   expect(result.data.value[0].c).toBe(19701);
@@ -147,38 +146,38 @@ it(`✅ join_many filter multiple values - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-      explore: a is table('${schema}.AIRPORTS'){
-        where: STATE = 'NH' | 'CA'
-      }
-      explore: b is table('${schema}.STATE_FACTS') {
-        join_many: a on STATE=a.STATE
-      }
-      query: b->{
-        aggregate: c is AIRPORT_COUNT.sum()
-        group_by: a.STATE
-      }
-      `
+    explore: a is table('malloytest.airports'){
+      where: state = 'NH' | 'CA'
+    }
+    explore: b is table('malloytest.state_facts') {
+      join_many: a on state=a.state
+    }
+    query: b->{
+      aggregate: c is airport_count.sum()
+      group_by: a.state
+    }
+    `
     )
     .run();
   expect(result.data.value[0].c).toBe(18605);
-  expect(result.data.value[0].STATE).toBeNull();
+  expect(result.data.value[0].state).toBeNull();
   expect(result.data.value[1].c).toBe(984);
-  expect(result.data.value[1].STATE).toBe("CA");
+  expect(result.data.value[1].state).toBe("CA");
   expect(result.data.value[2].c).toBe(112);
-  expect(result.data.value[2].STATE).toBe("NH");
+  expect(result.data.value[2].state).toBe("NH");
 });
 
 it(`✅ join_one condition no primary key - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-      explore: a is table('${schema}.STATE_FACTS'){}
-      explore: b is table('${schema}.AIRPORTS') {
-        join_one: a on STATE=a.STATE
-      }
-      query: b->{aggregate: c is a.AIRPORT_COUNT.sum()}
+    explore: a is table('malloytest.state_facts'){}
+    explore: b is table('malloytest.airports') {
+      join_one: a on state=a.state
+    }
+    query: b->{aggregate: c is a.airport_count.sum()}
 
-      `
+    `
     )
     .run();
   expect(result.data.value[0].c).toBe(19701);
@@ -188,24 +187,24 @@ it(`✅ join_one filter multiple values - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-      explore: a is table('${schema}.STATE_FACTS'){
-        where: STATE = 'TX' | 'LA'
-      }
-      explore: b is table('${schema}.AIRPORTS') {
-        join_one: a on STATE=a.STATE
-      }
-      query: b->{
-        aggregate: c is a.AIRPORT_COUNT.sum()
-        group_by: a.STATE
-      }
-      `
+    explore: a is table('malloytest.state_facts'){
+      where: state = 'TX' | 'LA'
+    }
+    explore: b is table('malloytest.airports') {
+      join_one: a on state=a.state
+    }
+    query: b->{
+      aggregate: c is a.airport_count.sum()
+      group_by: a.state
+    }
+    `
     )
     .run();
   // https://github.com/looker-open-source/malloy/pull/501#discussion_r861022857
   expect(result.data.value).toHaveLength(3);
-  expect(result.data.value).toContainEqual({ c: 1845, STATE: "TX" });
-  expect(result.data.value).toContainEqual({ c: 500, STATE: "LA" });
-  expect(result.data.value).toContainEqual({ c: 0, STATE: null });
+  expect(result.data.value).toContainEqual({ c: 1845, state: "TX" });
+  expect(result.data.value).toContainEqual({ c: 500, state: "LA" });
+  expect(result.data.value).toContainEqual({ c: 0, state: null });
 });
 
 it(`✅ join_many cross from  - ${databaseName}`, async () => {
@@ -215,19 +214,19 @@ it(`✅ join_many cross from  - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-      explore: a is table('${schema}.STATE_FACTS')
-      explore: f is a{
-        join_cross: a
-      }
-      query: f->{
-        aggregate:
-          row_count is count(distinct concat(STATE,a.STATE))
-          left_count is count()
-          right_count is a.count()
-          left_sum is AIRPORT_COUNT.sum()
-          right_sum is a.AIRPORT_COUNT.sum()
-      }
-      `
+    explore: a is table('malloytest.state_facts')
+    explore: f is a{
+      join_cross: a
+    }
+    query: f->{
+      aggregate:
+        row_count is count(distinct concat(state,a.state))
+        left_count is count()
+        right_count is a.count()
+        left_sum is airport_count.sum()
+        right_sum is a.airport_count.sum()
+    }
+    `
     )
     .run();
   expect(result.data.value[0].row_count).toBe(51 * 51);
@@ -242,20 +241,20 @@ it(`✅ join_one only  - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-      query: q is table('${schema}.STATE_FACTS')->{
-        aggregate: r is AIRPORT_COUNT.sum()
-      }
-      explore: f is table('${schema}.STATE_FACTS'){
-        join_one: a is from(->q)
-      }
-      query: f->{
-        aggregate:
-          row_count is count(distinct concat(STATE,a.r))
-          left_sum is AIRPORT_COUNT.sum()
-          right_sum is a.r.sum()
-          sum_sum is sum(AIRPORT_COUNT + a.r)
-      }
-      `
+    query: q is table('malloytest.state_facts')->{
+      aggregate: r is airport_count.sum()
+    }
+    explore: f is table('malloytest.state_facts'){
+      join_one: a is from(->q)
+    }
+    query: f->{
+      aggregate:
+        row_count is count(distinct concat(state,a.r))
+        left_sum is airport_count.sum()
+        right_sum is a.r.sum()
+        sum_sum is sum(airport_count + a.r)
+    }
+    `
     )
     .run();
   expect(result.data.value[0].row_count).toBe(51);
@@ -271,17 +270,17 @@ it(`✅ join_many cross ON  - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-      explore: a is table('${schema}.STATE_FACTS')
-      explore: f is a{
-        join_cross: a on a.STATE = 'CA' | 'NY'
-      }
-      query: f->{
-        aggregate:
-          row_count is count(distinct concat(STATE,a.STATE))
-          left_sum is AIRPORT_COUNT.sum()
-          right_sum is a.AIRPORT_COUNT.sum()
-      }
-      `
+    explore: a is table('malloytest.state_facts')
+    explore: f is a{
+      join_cross: a on a.state = 'CA' | 'NY'
+    }
+    query: f->{
+      aggregate:
+        row_count is count(distinct concat(state,a.state))
+        left_sum is airport_count.sum()
+        right_sum is a.airport_count.sum()
+    }
+    `
     )
     .run();
   expect(result.data.value[0].row_count).toBe(51 * 2);
@@ -294,12 +293,12 @@ it(`✅ limit - provided - ${databaseName}`, async () => {
   // symmetric aggregate are needed on both sides of the join
   // Check the row count and that sums on each side work properly.
   const query = `
-    query: table('${schema}.STATE_FACTS') -> {
-        group_by: STATE
-        aggregate: c is count()
-        limit: 3
-      }
-    `;
+  query: table('malloytest.state_facts') -> {
+      group_by: state
+      aggregate: c is count()
+      limit: 3
+    }
+  `;
 
   const queryMaterializer = runtime.loadQuery(query);
   const sqlQuery = await queryMaterializer.getSQL();
@@ -315,7 +314,7 @@ it(`✅ limit - provided - ${databaseName}`, async () => {
 //   const result = await runtime
 //     .loadQuery(
 //       `
-//       source: s is table('${schema}.state_facts') + {
+//       source: s is table('malloytest.state_facts') + {
 //       }
 //       query: s-> {
 //         group_by: state
@@ -337,11 +336,11 @@ it(`✅ limit - not provided - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-      query: table('${schema}.STATE_FACTS') -> {
-        group_by: STATE
-        aggregate: c is count()
-      }
-      `
+    query: table('malloytest.state_facts') -> {
+      group_by: state
+      aggregate: c is count()
+    }
+    `
     )
     .run();
   expect(result.resultExplore.limit).toBe(undefined);
@@ -354,80 +353,79 @@ it(`✅ limit pipeline - provided - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-      query: table('${schema}.STATE_FACTS') -> {
-        project: STATE
-        limit: 10
-      }
-      -> {
-        project: STATE
-        limit: 3
-      }
-      `
+    query: table('malloytest.state_facts') -> {
+      project: state
+      limit: 10
+    }
+    -> {
+      project: state
+      limit: 3
+    }
+    `
     )
     .run();
   expect(result.resultExplore.limit).toBe(3);
 });
 
-// TODO: casing error, "births_per_100k__1" is not referenced in quotes
-// Need to capitalize it to get it to work.
 it(`✅ ungrouped top level - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-        source: s is table('${schema}.STATE_FACTS') + {
-          measure: total_births is BIRTHS.sum()
-          measure: BIRTHS_PER_100K is floor(total_births/ all(total_births) * 100000)
-        }
+      source: s is table('malloytest.state_facts') + {
+        measure: total_births is births.sum()
+        measure: births_per_100k is floor(total_births/ all(total_births) * 100000)
+      }
 
-        query:s-> {
-          group_by: STATE
-          aggregate: BIRTHS_PER_100K
-        }
-      `
+      query:s-> {
+        group_by: state
+        aggregate: births_per_100k
+      }
+    `
     )
     .run();
   // console.log(result.sql);
-  expect(result.data.path(0, "BIRTHS_PER_100K").value).toBe(9742);
+  expect(result.data.path(0, "births_per_100k").value).toBe(9742);
 });
 
 it(`✅ ungrouped top level with nested  - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-        source: s is table('${schema}.STATE_FACTS') + {
-          measure: TOTAL_BIRTHS is BIRTHS.sum()
-          measure: BIRTHS_PER_100K is floor(TOTAL_BIRTHS/ all(TOTAL_BIRTHS) * 100000)
-        }
+      source: s is table('malloytest.state_facts') + {
+        measure: total_births is births.sum()
+        measure: births_per_100k is floor(total_births/ all(total_births) * 100000)
+      }
 
-        query:s-> {
-          group_by: STATE
-          aggregate: BIRTHS_PER_100K
-          nest: by_name is {
-            group_by: POPULAR_NAME
-            aggregate: TOTAL_BIRTHS
-          }
-          limit: 1000
+      query:s-> {
+        group_by: state
+        aggregate: births_per_100k
+        nest: by_name is {
+          group_by: popular_name
+          aggregate: total_births
         }
-      `
+        limit: 1000
+      }
+    `
     )
     .run();
-  expect(result.data.path(0, "BIRTHS_PER_100K").value).toBe(9742);
+  // console.log(result.sql);
+  expect(result.data.path(0, "births_per_100k").value).toBe(9742);
 });
 
 it(`✅ ungrouped - eliminate rows  - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-        source: s is table('${schema}.STATE_FACTS') + {
-          measure: M is all(BIRTHS.sum())
-          where: STATE='CA' | 'NY'
-        }
+      source: s is table('malloytest.state_facts') + {
+        measure: m is all(births.sum())
+        where: state='CA' | 'NY'
+      }
 
-        query:s-> {
-          group_by: STATE
-          aggregate: M
-        }
-      `
+      query:s-> {
+        group_by: state
+        aggregate: m
+      }
+    `
     )
     .run();
   // console.log(result.sql);
@@ -438,24 +436,24 @@ it(`✅ ungrouped nested with no grouping above - ${databaseName}`, async () => 
   const result = await runtime
     .loadQuery(
       `
-        source: s is table('${schema}.STATE_FACTS') + {
-          measure: TOTAL_BIRTHS is BIRTHS.sum()
-          measure: BIRTHS_PER_100K is floor(TOTAL_BIRTHS/ all(TOTAL_BIRTHS) * 100000)
-        }
+      source: s is table('malloytest.state_facts') + {
+        measure: total_births is births.sum()
+        measure: births_per_100k is floor(total_births/ all(total_births) * 100000)
+      }
 
-        query: s-> {
-          aggregate: TOTAL_BIRTHS
-          nest: BY_NAME is {
-            group_by: POPULAR_NAME
-            aggregate: BIRTHS_PER_100K
-          }
+      query: s-> {
+        aggregate: total_births
+        nest: by_name is {
+          group_by: popular_name
+          aggregate: births_per_100k
         }
+      }
 
-      `
+    `
     )
     .run();
   // console.log(result.sql);
-  expect(result.data.path(0, "BY_NAME", 0, "BIRTHS_PER_100K").value).toBe(
+  expect(result.data.path(0, "by_name", 0, "births_per_100k").value).toBe(
     66703
   );
 });
@@ -464,102 +462,102 @@ it(`✅ ungrouped - partial grouping - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-        source: AIRPORTS is table('${schema}.AIRPORTS') {
-          measure: C is count()
-        }
+      source: airports is table('malloytest.airports') {
+        measure: c is count()
+      }
 
 
-         query: AIRPORTS -> {
-          where: STATE = 'TX' | 'NY'
-          group_by:
-            FAA_REGION
-            STATE
+       query: airports -> {
+        where: state = 'TX' | 'NY'
+        group_by:
+          faa_region
+          state
+        aggregate:
+          c
+          all_ is all(c)
+          airport_count is c {? fac_type = 'AIRPORT'}
+        nest: fac_type is {
+          group_by: fac_type
           aggregate:
-            C
-            ALL_ is all(C)
-            AIRPORT_COUNT is C {? FAC_TYPE = 'AIRPORT'}
-          nest: FAC_TYPE is {
-            group_by: FAC_TYPE
-            aggregate:
-              C
-              ALL_ is all(C)
-              ALL_STATE_REGION is exclude(C,FAC_TYPE)
-              ALL_OF_THIS_TYPE is exclude(C, STATE, FAA_REGION)
-              ALL_TOP is exclude(C, STATE, FAA_REGION, FAC_TYPE)
-          }
+            c
+            all_ is all(c)
+            all_state_region is exclude(c,fac_type)
+            all_of_this_type is exclude(c, state, faa_region)
+            all_top is exclude(c, state, faa_region, fac_type)
         }
+      }
 
-      `
+    `
     )
     .run();
   // console.log(result.sql);
-  expect(result.data.path(0, "FAC_TYPE", 0, "ALL_").value).toBe(1845);
-  expect(result.data.path(0, "FAC_TYPE", 0, "ALL_STATE_REGION").value).toBe(
+  expect(result.data.path(0, "fac_type", 0, "all_").value).toBe(1845);
+  expect(result.data.path(0, "fac_type", 0, "all_state_region").value).toBe(
     1845
   );
-  expect(result.data.path(0, "FAC_TYPE", 0, "ALL_OF_THIS_TYPE").value).toBe(
+  expect(result.data.path(0, "fac_type", 0, "all_of_this_type").value).toBe(
     1782
   );
-  expect(result.data.path(0, "FAC_TYPE", 0, "ALL_TOP").value).toBe(2421);
+  expect(result.data.path(0, "fac_type", 0, "all_top").value).toBe(2421);
 });
 
 it(`✅ ungrouped - all nested - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-        source: airports is table('${schema}.AIRPORTS') {
-          measure: C is count()
-        }
+      source: airports is table('malloytest.airports') {
+        measure: c is count()
+      }
 
 
-         query: airports -> {
-          where: STATE = 'TX' | 'NY'
-          group_by:
-            STATE
+       query: airports -> {
+        where: state = 'TX' | 'NY'
+        group_by:
+          state
+        aggregate:
+          c
+          all_ is all(c)
+          airport_count is c {? fac_type = 'AIRPORT'}
+        nest: fac_type is {
+          group_by: fac_type, major
           aggregate:
-            C
-            ALL_ is all(C)
-            AIRPORT_COUNT is C {? FAC_TYPE = 'AIRPORT'}
-          nest: FAC_TYPE is {
-            group_by: FAC_TYPE, MAJOR
-            aggregate:
-              C
-              ALL_ is all(C)
-              ALL_MAJOR is all(C,MAJOR)
-          }
+            c
+            all_ is all(c)
+            all_major is all(c,major)
         }
+      }
 
 
-      `
+    `
     )
     .run();
   // console.log(result.sql);
-  expect(result.data.path(0, "FAC_TYPE", 0, "ALL_").value).toBe(1845);
-  expect(result.data.path(0, "FAC_TYPE", 0, "ALL_MAJOR").value).toBe(1819);
+  expect(result.data.path(0, "fac_type", 0, "all_").value).toBe(1845);
+  expect(result.data.path(0, "fac_type", 0, "all_major").value).toBe(1819);
 });
 
 it(`✅ ungrouped nested  - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-        source: s is table('${schema}.STATE_FACTS') + {
-          measure: TOTAL_BIRTHS is BIRTHS.sum()
-          measure: BIRTHS_PER_100K is floor(TOTAL_BIRTHS/ all(TOTAL_BIRTHS) * 100000)
-        }
+      source: s is table('malloytest.state_facts') + {
+        measure: total_births is births.sum()
+        measure: births_per_100k is floor(total_births/ all(total_births) * 100000)
+      }
 
-        query:s ->  {
-          group_by: POPULAR_NAME
-          nest: BY_STATE is {
-            group_by: STATE
-            aggregate: BIRTHS_PER_100K
-          }
+      query:s ->  {
+        group_by: popular_name
+        nest: by_state is {
+          group_by: state
+          aggregate: births_per_100k
         }
+      }
 
-      `
+    `
     )
     .run();
   // console.log(result.sql);
-  expect(result.data.path(0, "BY_STATE", 0, "BIRTHS_PER_100K").value).toBe(
+  expect(result.data.path(0, "by_state", 0, "births_per_100k").value).toBe(
     36593
   );
 });
@@ -568,24 +566,24 @@ it(`✅ ungrouped nested expression  - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-        source: s is table('${schema}.STATE_FACTS') + {
-          measure: TOTAL_BIRTHS is BIRTHS.sum()
-          measure: BIRTHS_PER_100K is floor(TOTAL_BIRTHS/ all(TOTAL_BIRTHS) * 100000)
-        }
+      source: s is table('malloytest.state_facts') + {
+        measure: total_births is births.sum()
+        measure: births_per_100k is floor(total_births/ all(total_births) * 100000)
+      }
 
-        query:s ->  {
-          group_by: UPPER_NAME is upper(POPULAR_NAME)
-          nest: BY_STATE is {
-            group_by: STATE
-            aggregate: BIRTHS_PER_100K
-          }
+      query:s ->  {
+        group_by: upper_name is upper(popular_name)
+        nest: by_state is {
+          group_by: state
+          aggregate: births_per_100k
         }
+      }
 
-      `
+    `
     )
     .run();
   // console.log(result.sql);
-  expect(result.data.path(0, "BY_STATE", 0, "BIRTHS_PER_100K").value).toBe(
+  expect(result.data.path(0, "by_state", 0, "births_per_100k").value).toBe(
     36593
   );
 });
@@ -594,186 +592,186 @@ it(`✅ ungrouped nested group by float  - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-        source: s is table('${schema}.STATE_FACTS') + {
-          measure: TOTAL_BIRTHS is BIRTHS.sum()
-          measure: UG is all(TOTAL_BIRTHS)
-        }
+      source: s is table('malloytest.state_facts') + {
+        measure: total_births is births.sum()
+        measure: ug is all(total_births)
+      }
 
-        query:s ->  {
-          group_by: F is floor(AIRPORT_COUNT/300.0)
-          nest: BY_STATE is {
-            group_by: STATE
-            aggregate: UG
-          }
+      query:s ->  {
+        group_by: f is floor(airport_count/300.0)
+        nest: by_state is {
+          group_by: state
+          aggregate: ug
         }
+      }
 
-      `
+    `
     )
     .run();
   // console.log(result.sql);
   // console.log(JSON.stringify(result.data.toObject(), null, 2));
-  expect(result.data.path(0, "BY_STATE", 0, "UG").value).toBe(62742230);
+  expect(result.data.path(0, "by_state", 0, "ug").value).toBe(62742230);
 });
 
 it(`✅ all with parameters - basic  - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-        source: S is table('${schema}.STATE_FACTS') + {
-          measure: TOTAL_BIRTHS is BIRTHS.sum()
-        }
+      source: s is table('malloytest.state_facts') + {
+        measure: total_births is births.sum()
+      }
 
-        query: S -> {
-          group_by: POPULAR_NAME, STATE
-          aggregate:
-            TOTAL_BIRTHS
-            ALL_BIRTHS is all(TOTAL_BIRTHS)
-            ALL_NAME is exclude(TOTAL_BIRTHS, STATE)
-        }
+      query: s -> {
+        group_by: popular_name, state
+        aggregate:
+          total_births
+          all_births is all(total_births)
+          all_name is exclude(total_births, state)
+      }
 
-      `
+    `
     )
     .run();
   // console.log(result.sql);
   // console.log(JSON.stringify(result.data.toObject(), null, 2));
-  expect(result.data.path(0, "ALL_BIRTHS").value).toBe(295727065);
-  expect(result.data.path(0, "ALL_NAME").value).toBe(197260594);
+  expect(result.data.path(0, "all_births").value).toBe(295727065);
+  expect(result.data.path(0, "all_name").value).toBe(197260594);
 });
 
 it(`✅ all with parameters - nest  - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-        source: S is table('${schema}.STATE_FACTS') + {
-          measure: TOTAL_BIRTHS is BIRTHS.sum()
-          dimension: ABC is floor(AIRPORT_COUNT/300)
-        }
+      source: s is table('malloytest.state_facts') + {
+        measure: total_births is births.sum()
+        dimension: abc is floor(airport_count/300)
+      }
 
-        query: S -> {
-          group_by: ABC
-          aggregate: TOTAL_BIRTHS
-          nest: BY_STUFF is {
-            group_by: POPULAR_NAME, STATE
-            aggregate:
-              TOTAL_BIRTHS
-              ALL_BIRTHS is all(TOTAL_BIRTHS)
-              ALL_NAME is exclude(TOTAL_BIRTHS, STATE)
-          }
+      query: s -> {
+        group_by: abc
+        aggregate: total_births
+        nest: by_stuff is {
+          group_by: popular_name, state
+          aggregate:
+            total_births
+            all_births is all(total_births)
+            all_name is exclude(total_births, state)
         }
+      }
 
-      `
+    `
     )
     .run();
   // console.log(result.sql);
   // console.log(JSON.stringify(result.data.toObject(), null, 2));
-  expect(result.data.path(0, "BY_STUFF", 0, "ALL_BIRTHS").value).toBe(
+  expect(result.data.path(0, "by_stuff", 0, "all_births").value).toBe(
     119809719
   );
-  expect(result.data.path(0, "BY_STUFF", 0, "ALL_NAME").value).toBe(61091215);
+  expect(result.data.path(0, "by_stuff", 0, "all_name").value).toBe(61091215);
 });
 
-it(`❌ single value to udf - snowflake`, async () => {
-  const loadedQuery: QueryMaterializer = runtime.loadQuery(
+it(`✅ single value to udf - snowflake`, async () => {
+  const result = await runtime
+    .loadQuery(
+      `
+    source: f is  table('malloytest.state_facts') {
+      query: fun is {
+        aggregate: t is count()
+      }
+      -> {
+        project: t1 is t+1
+      }
+    }
+    query: f-> {
+      nest: fun
+    }
     `
-      source: F is  table('${schema}.STATE_FACTS') {
-        query: FUN is {
-          aggregate: T is count()
-        }
-        -> {
-          project: T1 is T+1
-        }
-      }
-      query: F-> {
-        nest: FUN
-      }
-      `
-  );
-
-  const result: Result = await loadedQuery.run();
+    )
+    .run();
   // console.log(result.sql);
-  expect(result.data.path(0, "FUN", 0, "T1").value).toBe(52);
+  expect(result.data.path(0, "fun", 0, "t1").value).toBe(52);
 });
 
-it(`❌ Multi value to udf - ${databaseName}`, async () => {
+it(`✅ Multi value to udf - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-      source: F is  table('${schema}.STATE_FACTS') {
-        query: FUN is {
-          group_by: ONE is 1
-          aggregate: T is count()
-        }
-        -> {
-          PROJECT: T1 is T+1
-        }
+    source: f is  table('malloytest.state_facts') {
+      query: fun is {
+        group_by: one is 1
+        aggregate: t is count()
       }
-      query: F-> {
-        nest: FUN
+      -> {
+        project: t1 is t+1
       }
-      `
+    }
+    query: f-> {
+      nest: fun
+    }
+    `
     )
     .run();
   // console.log(result.sql);
   // console.log(result.data.toObject());
-  expect(result.data.path(0, "FUN", 0, "T1").value).toBe(52);
+  expect(result.data.path(0, "fun", 0, "t1").value).toBe(52);
 });
 
-it(`❌ Multi value to udf group by - ${databaseName}`, async () => {
+it(`✅ Multi value to udf group by - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-      source: F is  table('${schema}.STATE_FACTS') {
-        query: FUN is {
-          group_by: ONE is 1
-          aggregate: T is count()
-        }
-        -> {
-          group_by: T1 is T+1
-        }
+    source: f is  table('malloytest.state_facts') {
+      query: fun is {
+        group_by: one is 1
+        aggregate: t is count()
       }
-      query: F-> {
-        nest: FUN
+      -> {
+        group_by: t1 is t+1
       }
-      `
+    }
+    query: f-> {
+      nest: fun
+    }
+    `
     )
     .run();
   // console.log(result.sql);
   // console.log(result.data.toObject());
-  expect(result.data.path(0, "FUN", 0, "T1").value).toBe(52);
+  expect(result.data.path(0, "fun", 0, "t1").value).toBe(52);
 });
 
 it(`✅ sql_block - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-      sql: ONE is ||
-        SELECT 1 as A, 2 as B
-        UNION ALL SELECT 3, 4
-      ;;
+    sql: one is ||
+      SELECT 1 as a, 2 as b
+      UNION ALL SELECT 3, 4
+    ;;
 
-      explore: EONE is  from_sql(ONE) {}
+    explore: eone is  from_sql(one) {}
 
-      query: EONE -> { project: A }
-      `
+    query: eone -> { project: a }
+    `
     )
     .run();
-  expect(result.data.value[0].A).toBe(1);
+  expect(result.data.value[0].a).toBe(1);
 });
 
 it(`✅ sql_block no explore- ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-      sql: ONE is ||
-        SELECT 1 as A, 2 as B
-        UNION ALL SELECT 3, 4
-      ;;
+    sql: one is ||
+      SELECT 1 as a, 2 as b
+      UNION ALL SELECT 3, 4
+    ;;
 
-      query: from_sql(ONE) -> { project: A }
-      `
+    query: from_sql(one) -> { project: a }
+    `
     )
     .run();
-  expect(result.data.value[0].A).toBe(1);
+  expect(result.data.value[0].a).toBe(1);
 });
 
 // it(`sql_block version- ${databaseName}`, async () => {
@@ -796,210 +794,217 @@ it(`✅ local declarations external query - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-      sql: ONE is ||
-        SELECT 1 as A, 2 as B
-        UNION ALL SELECT 3, 4
-      ;;
+    sql: one is ||
+      SELECT 1 as a, 2 as b
+      UNION ALL SELECT 3, 4
+    ;;
 
-      query: from_sql(ONE) -> {
-        declare: C is A + 1
-        project: C
-      }
-      `
+    query: from_sql(one) -> {
+      declare: c is a + 1
+      project: c
+    }
+    `
     )
     .run();
-  expect(result.data.value[0].C).toBe(2);
+  expect(result.data.value[0].c).toBe(2);
 });
 
 it(`✅ local declarations named query - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-      sql: ONE is ||
-        SELECT 1 as A, 2 as B
-        UNION ALL SELECT 3, 4
-      ;;
+    sql: one is ||
+      SELECT 1 as a, 2 as b
+      UNION ALL SELECT 3, 4
+    ;;
 
-      source: FOO is from_sql(ONE) + {
-        QUERY: BAR is {
-          declare: C is A + 1
-          project: C
-        }
+    source: foo is from_sql(one) + {
+      query: bar is {
+        declare: c is a + 1
+        project: c
       }
+    }
 
-      QUERY: FOO-> BAR
-      `
+    query: foo-> bar
+    `
     )
     .run();
-  expect(result.data.value[0].C).toBe(2);
+  expect(result.data.value[0].c).toBe(2);
 });
 
 it(`✅ local declarations refined named query - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-      sql: ONE is ||
-        SELECT 1 as A, 2 as B
-        UNION ALL SELECT 3, 4
-      ;;
+    sql: one is ||
+      SELECT 1 as a, 2 as b
+      UNION ALL SELECT 3, 4
+    ;;
 
-      source: FOO is from_sql(ONE) + {
-        query: BAR is {
-          declare: C is A + 1
-          project: C
-        }
-
-        query: BAZ is BAR + {
-          declare: D is C + 1
-          project: D
-        }
+    source: foo is from_sql(one) + {
+      query: bar is {
+        declare: c is a + 1
+        project: c
       }
 
-      query: FOO-> BAZ
-      `
+      query: baz is bar + {
+        declare: d is c + 1
+        project: d
+      }
+    }
+
+    query: foo-> baz
+    `
     )
     .run();
-  expect(result.data.value[0].D).toBe(3);
+  expect(result.data.value[0].d).toBe(3);
 });
 
 it(`✅ regexp match- ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-      sql: ONE is ||
-        SELECT 'hello mom' as A, 'cheese tastes good' as B
-        UNION ALL SELECT 'lloyd is a bozo', 'michael likes poetry'
-      ;;
+    sql: one is ||
+      SELECT 'hello mom' as a, 'cheese tastes good' as b
+      UNION ALL SELECT 'lloyd is a bozo', 'michael likes poetry'
+    ;;
 
-      query: from_sql(ONE) -> {
-        aggregate: LLO is count() {? A ~ r'llo'}
-        aggregate: M2 is count() {? A !~ r'bozo'}
-      }
-      `
+    query: from_sql(one) -> {
+      aggregate: llo is count() {? a ~ r'llo'}
+      aggregate: m2 is count() {? a !~ r'bozo'}
+    }
+    `
     )
     .run();
-  expect(result.data.value[0].LLO).toBe(2);
-  expect(result.data.value[0].M2).toBe(1);
+  expect(result.data.value[0].llo).toBe(2);
+  expect(result.data.value[0].m2).toBe(1);
 });
 
 it(`✅ substitution precidence- ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-      sql: ONE is ||
-        SELECT 5 as A, 2 as B
-        UNION ALL SELECT 3, 4
-      ;;
+    sql: one is ||
+      SELECT 5 as a, 2 as b
+      UNION ALL SELECT 3, 4
+    ;;
 
-      query: from_sql(ONE) -> {
-        declare: C is B + 4
-        project: X is A * C
-      }
-      `
+    query: from_sql(one) -> {
+      declare: c is b + 4
+      project: x is a * c
+    }
+    `
     )
     .run();
-  expect(result.data.value[0].X).toBe(30);
+  expect(result.data.value[0].x).toBe(30);
 });
 
-it(`✅ array unnest 1 -- snowflake`, async () => {
-  const loadedQuery = runtime.loadQuery(
-    `
-        sql: ATITLE is ||
-          SELECT
-            city,
-            ${splitFunction[databaseName]}(city,' ') as WORDS
-          FROM ${schema}.AIRCRAFT
-        ;;
-
-        source: TITLE is from_sql(ATITLE){}
-
-        query: TITLE ->  {
-          where: WORDS.VALUE != null
-          group_by: WORDS.VALUE
-          aggregate: C is count()
-        }
-      `
-  );
-  const result = await loadedQuery.run();
-  console.log(result.sql);
-  expect(result.data.value[0].C).toBe(145);
-});
-
-// make sure we can count the total number of elements when fanning out.
-it(`✅ array unnest x 2 - snowflake`, async () => {
+// Ugh, this is annoying... 'words' is getting translated to uppercase "WORDS" in Snowflake
+// when querying the information_schema
+//
+// The `as` key in the structdef is automatically translating it to LOWER('WORDS').
+// As is, the only way to get inline SQL to work is requiring quoted identifiers.
+it(`🟨 array unnest - snowflake`, async () => {
   const result = await runtime
     .loadQuery(
       `
-        sql: ATITLE is ||
-          SELECT
-            CITY,
-            ${splitFunction[databaseName]}(city,' ') as WORDS,
-            ${splitFunction[databaseName]}(city,'A') as ABREAK
-          FROM ${schema}.AIRCRAFT
-          where CITY IS NOT null
-        ;;
+      sql: atitle is ||
+        SELECT
+          city,
+          ${splitFunction[databaseName]}(city,' ') as "words"
+        FROM ${rootDbPath[databaseName]}malloytest.aircraft
+      ;;
 
-        source: TITLE is from_sql(ATITLE){}
+      source: title is from_sql(atitle){}
 
-        query: TITLE ->  {
-          aggregate:
-            B is count()
-            C is WORDS.count()
-            A is ABREAK.count()
-        }
-      `
+      query: title ->  {
+        where: words.value != null
+        group_by: words.value
+        aggregate: c is count()
+      }
+    `
     )
     .run();
-  expect(result.data.value[0].B).toBe(3552);
-  expect(result.data.value[0].C).toBe(4586);
-  expect(result.data.value[0].A).toBe(6601);
+  expect(result.data.value[0].c).toBe(145);
+});
+
+// make sure we can count the total number of elements when fanning out.
+// Hmm, colon vs period access is broken
+// See TODO in sqlFieldReference
+it(`❌ array unnest x 2 - snowflake`, async () => {
+  const result = await runtime
+    .loadQuery(
+      `
+      sql: atitle is ||
+        SELECT
+          city,
+          ${splitFunction[databaseName]}(city,' ') as "words",
+          ${splitFunction[databaseName]}(city,'A') as "abreak"
+        FROM ${rootDbPath[databaseName]}malloytest.aircraft
+        where city IS NOT null
+      ;;
+
+      source: title is from_sql(atitle){}
+
+      query: title ->  {
+        aggregate:
+          b is count()
+          c is words.count()
+          a is abreak.count()
+      }
+    `
+    )
+    .run();
+  expect(result.data.value[0].b).toBe(3552);
+  expect(result.data.value[0].c).toBe(4586);
+  expect(result.data.value[0].a).toBe(6601);
 });
 
 it(`✅ nest null - ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-        query: table('${schema}.AIRPORTS') -> {
-          where: FAA_REGION = null
-          group_by: FAA_REGION
-          aggregate: AIRPORT_COUNT is count()
-          nest: BY_STATE is {
-            where: STATE != null
-            group_by: STATE
-            aggregate: AIRPORT_COUNT is count()
-          }
-          nest: BY_STATE1 is {
-            where: STATE != null
-            group_by: STATE
-            aggregate: AIRPORT_COUNT is count()
-            limit: 1
-          }
+      query: table('malloytest.airports') -> {
+        where: faa_region = null
+        group_by: faa_region
+        aggregate: airport_count is count()
+        nest: by_state is {
+          where: state != null
+          group_by: state
+          aggregate: airport_count is count()
         }
-      `
+        nest: by_state1 is {
+          where: state != null
+          group_by: state
+          aggregate: airport_count is count()
+          limit: 1
+        }
+      }
+    `
     )
     .run();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const d: any = result.data.toObject();
-  expect(d[0]["BY_STATE"]).not.toBe(null);
-  expect(d[0]["BY_STATE1"]).not.toBe(null);
+  expect(d[0]["by_state"]).not.toBe(null);
+  expect(d[0]["by_state1"]).not.toBe(null);
 });
 
 it(`✅ number as null- ${databaseName}`, async () => {
   const result = await runtime
     .loadQuery(
       `
-        source: S is table('${schema}.STATE_FACTS') + {
+      source: s is table('malloytest.state_facts') + {
+      }
+      query: s-> {
+        group_by: state
+        nest: ugly is {
+          group_by: popular_name
+          aggregate: foo is NULLIF(sum(airport_count)*0,0)+1
         }
-        query: S-> {
-          group_by: STATE
-          nest: UGLY is {
-            group_by: POPULAR_NAME
-            aggregate: FOO is NULLIF(sum(AIRPORT_COUNT)*0,0)+1
-          }
-        }
-      `
+      }
+    `
     )
     .run();
-  expect(result.data.path(0, "UGLY", 0, "FOO").value).toBe(null);
+  expect(result.data.path(0, "ugly", 0, "foo").value).toBe(null);
 });

@@ -260,6 +260,10 @@ export class DuckDBDialect extends Dialect {
     return `(SELECT UNNEST(${p}) as base)`;
   }
 
+  sqlPipelinedStage(pipelinesSQL: string, lastStageName: string): string {
+    throw new Error("sqlPipelinedStage should not be called from duckdb");
+  }
+
   sqlCreateFunction(id: string, funcText: string): string {
     return `DROP MACRO IF EXISTS ${id}; \n${hackSplitComment}\n CREATE MACRO ${id}(_param) AS (\n${indent(
       funcText

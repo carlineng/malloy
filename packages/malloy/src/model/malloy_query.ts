@@ -785,6 +785,8 @@ class QueryFieldDistinctKey extends QueryAtomicField {
       const parentKey = this.parent.parent
         ?.getDistinctKey()
         .generateExpression(resultSet);
+      // Is there a way to distinguish between a nested struct field and a joined table?
+      // structSource appears to be {type: 'nested'} in both
       return `CONCAT(${parentKey}, 'x', ${this.parent.dialect.sqlFieldReference(
         this.parent.getIdentifier(),
         "__row_id",
@@ -2359,10 +2361,12 @@ class QueryQuery extends QueryField {
       `
       )
       .join(",\n");
-    return stageWriter.addStage(
-      `SELECT * replace (${pipelinesSQL}) FROM ${lastStageName}
-      `
+
+    const stageSQL = this.parent.dialect.sqlPipelinedStage(
+      pipelinesSQL,
+      lastStageName
     );
+    return stageWriter.addStage(stageSQL);
   }
 
   generateStage0Fields(
@@ -3358,7 +3362,7 @@ class QueryStruct extends QueryNode {
       const x =
         this.parent.getSQLIdentifier() +
         "." +
-        getIdentifier(this.fieldDef) +
+        this.dialect.sqlMaybeQuoteIdentifier(getIdentifier(this.fieldDef)) +
         `[${this.getIdentifier()}.__row_id]`;
       return x;
     } else {

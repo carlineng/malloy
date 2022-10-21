@@ -216,7 +216,7 @@ export class SnowflakeConnection
       ...config,
       account: config.account || "",
       username: config.username || "",
-      schema: `"UpperSchema"`,
+      schema: config.schema || "",
     });
 
     connection.connect((err, conn) => {
@@ -326,7 +326,8 @@ export class SnowflakeConnection
         malloyType = snowflakeToMalloyTypes[row["element_type"] as string];
         s = {
           type: "struct",
-          name: row["COLUMN_NAME"] as string,
+          name,
+          as: name.toLowerCase(),
           dialect: this.dialectName,
           structRelationship: { type: "nested", field: name, isArray: true },
           structSource: { type: "nested" },
@@ -337,7 +338,7 @@ export class SnowflakeConnection
       } else if (snowflakeDataType === "ARRAY") {
         const selectLimitOne = `
         SELECT
-          GET(${name}, 0) AS sample_element,
+          GET("${name}", 0) AS sample_element,
           TYPEOF(sample_element) AS data_type
         FROM (${selectStatement})
         LIMIT 1`;
@@ -350,7 +351,8 @@ export class SnowflakeConnection
           malloyType = snowflakeToMalloyTypes[sfDataType];
           s = {
             type: "struct",
-            name: row["COLUMN_NAME"] as string,
+            name: name,
+            as: name.toLowerCase(),
             dialect: this.dialectName,
             structRelationship: { type: "nested", field: name, isArray: true },
             structSource: { type: "nested" },
@@ -367,6 +369,7 @@ export class SnowflakeConnection
         s.fields.push({
           type: malloyType,
           name,
+          as: name.toLowerCase(),
         });
       } else {
         throw new Error(`unknown Snowflake type ${snowflakeDataType}`);

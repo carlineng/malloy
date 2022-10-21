@@ -183,6 +183,10 @@ export class StandardSQLDialect extends Dialect {
     return `UNNEST(${p})`;
   }
 
+  sqlPipelinedStage(pipelinesSQL: string, lastStageName: string): string {
+    return `SELECT * replace (${pipelinesSQL}) FROM ${lastStageName}`;
+  }
+
   sqlCreateFunction(id: string, funcText: string): string {
     return `CREATE TEMPORARY FUNCTION ${id}(__param ANY TYPE) AS ((\n${indent(
       funcText
